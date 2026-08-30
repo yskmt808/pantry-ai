@@ -32,6 +32,8 @@ function isTestOrPlaceholderEnv(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   return (
     process.env.NODE_ENV === "test" ||
+    process.env.VITEST === "true" ||
+    process.env.CI === "true" ||
     !url ||
     url.includes("placeholder")
   );
