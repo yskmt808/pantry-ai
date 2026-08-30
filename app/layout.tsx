@@ -3,6 +3,7 @@ import "./globals.css";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveHousehold } from "@/app/actions/items";
 import { AuthButton } from "@/components/auth/auth-button";
+import { ReloadButton } from "@/components/ui/reload-button";
 import { Refrigerator } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -28,24 +29,25 @@ export default async function RootLayout({
       <body className="min-h-screen bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-50">
         {/* Header Navigation */}
         <header className="sticky top-0 z-40 w-full border-b border-neutral-200/80 bg-white/80 backdrop-blur-md dark:border-neutral-800 dark:bg-neutral-900/80">
-          <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+          <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-3 sm:px-6">
             {/* Logo */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-md shadow-emerald-600/30">
                 <Refrigerator className="h-5 w-5" />
               </div>
               <div>
-                <span className="text-base font-extrabold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent dark:from-emerald-400 dark:to-teal-400">
+                <span className="text-base sm:text-lg font-extrabold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent dark:from-emerald-400 dark:to-teal-400">
                   pantry-ai
                 </span>
-                <span className="ml-2 hidden rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 sm:inline-block">
+                <span className="ml-1.5 hidden rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 sm:inline-block">
                   AI執事
                 </span>
               </div>
             </div>
 
-            {/* Auth Actions */}
-            <div className="flex items-center gap-3">
+            {/* Header Actions (リロード + 設定 + 認証) */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <ReloadButton />
               <AuthButton user={user} isSharedDevice={isSharedDevice} />
             </div>
           </div>
