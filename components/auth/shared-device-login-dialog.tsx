@@ -25,53 +25,67 @@ interface SharedDeviceLoginDialogProps {
   onLoginSuccess?: () => void;
 }
 
+function generateLocalCodes() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let userCode = "";
+  for (let i = 0; i < 4; i++) {
+    userCode += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  const tokenChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+  let deviceCode = "";
+  for (let i = 0; i < 32; i++) {
+    deviceCode += tokenChars.charAt(Math.floor(Math.random() * tokenChars.length));
+  }
+  return { userCode, deviceCode };
+}
+
 export function SharedDeviceLoginDialog({
   open,
   onOpenChange,
   onLoginSuccess,
 }: SharedDeviceLoginDialogProps) {
-  const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<DeviceLinkSessionInfo | null>(null);
-  const [status, setStatus] = useState<"loading" | "pending" | "approved" | "consumed" | "expired">("loading");
+  const [status, setStatus] = useState<"pending" | "approved" | "consumed" | "expired">("pending");
   const [householdName, setHouseholdName] = useState<string>("");
   const [timeLeft, setTimeLeft] = useState<number>(300);
 
-  // セッション発行
-  const startSession = async () => {
+  // ダイアログが開いた瞬間にローカルで即座にQRコードを生成・表示
+  const initInstantSession = async () => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const { userCode, deviceCode } = generateLocalCodes();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const linkUrl = `${origin}/link-device?code=${deviceCode}`;
+
+    const initialInfo: DeviceLinkSessionInfo = {
+      deviceCode,
+      userCode,
+      deviceName: "冷蔵庫の共有端末",
+      status: "pending",
+      expiresAt,
+      linkUrl,
+    };
+
+    // 1. 0ミリ秒で画面にQRコードを描画
+    setSession(initialInfo);
+    setStatus("pending");
+    setTimeLeft(300);
+
+    // 2. バックグラウンドでサーバー側にセッション登録
     try {
-      setLoading(true);
-      setStatus("loading");
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const timeoutPromise = new Promise<{ success: false; error: string }>((_, reject) =>
-        setTimeout(() => reject(new Error("タイムアウト")), 8000)
-      );
-
-      const res = await Promise.race([
-        initiateDeviceLink("冷蔵庫の共有端末", origin),
-        timeoutPromise,
-      ]);
-
+      const res = await initiateDeviceLink("冷蔵庫の共有端末", origin);
       if (res.success && res.data) {
         setSession(res.data);
-        setStatus("pending");
-        setTimeLeft(300);
-      } else {
-        setStatus("expired");
       }
-    } catch (err) {
-      console.error("Failed to start session:", err);
-      setStatus("expired");
-    } finally {
-      setLoading(false);
+    } catch {
+      // ignore
     }
   };
 
   useEffect(() => {
     if (open) {
-      startSession();
+      initInstantSession();
     } else {
       setSession(null);
-      setStatus("loading");
     }
   }, [open]);
 
@@ -90,22 +104,26 @@ export function SharedDeviceLoginDialog({
     }, 1000);
 
     const pollInterval = setInterval(async () => {
-      const res = await checkDeviceLinkStatus(session.deviceCode);
-      if (res.status === "approved") {
-        setStatus("approved");
-        setHouseholdName(res.householdName || "我が家のパントリー");
-        await consumeDeviceLink(session.deviceCode);
-        setTimeout(() => {
-          setStatus("consumed");
-          if (onLoginSuccess) onLoginSuccess();
+      try {
+        const res = await checkDeviceLinkStatus(session.deviceCode);
+        if (res.status === "approved") {
+          setStatus("approved");
+          setHouseholdName(res.householdName || "我が家のパントリー");
+          await consumeDeviceLink(session.deviceCode);
           setTimeout(() => {
-            window.location.reload();
+            setStatus("consumed");
+            if (onLoginSuccess) onLoginSuccess();
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
           }, 1200);
-        }, 1500);
-      } else if (res.status === "expired") {
-        setStatus("expired");
+        } else if (res.status === "expired") {
+          setStatus("expired");
+        }
+      } catch {
+        // ignore polling error
       }
-    }, 2500);
+    }, 2000);
 
     return () => {
       clearInterval(timer);
@@ -125,15 +143,7 @@ export function SharedDeviceLoginDialog({
       description="個人のスマホでQRコードを読み取るだけで連携できます"
     >
       <div className="space-y-3 pt-1">
-        {/* Status: Loading */}
-        {status === "loading" && (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <RefreshCw className="h-7 w-7 animate-spin text-emerald-600 dark:text-emerald-400 mb-2" />
-            <p className="text-xs text-neutral-500">QRコードを発行しています...</p>
-          </div>
-        )}
-
-        {/* Status: Pending (コンパクトなスマート2カラムレイアウト) */}
+        {/* Status: Pending (0秒即時描画) */}
         {status === "pending" && session && (
           <div className="flex flex-col sm:flex-row items-center gap-4 py-1">
             {/* 左側: QRコード */}
@@ -211,7 +221,7 @@ export function SharedDeviceLoginDialog({
             <p className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
               有効期限が切れました
             </p>
-            <Button size="sm" onClick={startSession} className="gap-1.5">
+            <Button size="sm" onClick={initInstantSession} className="gap-1.5">
               <RefreshCw className="h-3.5 w-3.5" />
               <span>QRコードを再発行</span>
             </Button>
