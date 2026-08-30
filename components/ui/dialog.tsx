@@ -25,6 +25,9 @@ export function Dialog({
 
   React.useEffect(() => {
     setMounted(true);
+  }, []);
+
+  React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onOpenChange(false);
     };
@@ -39,6 +42,9 @@ export function Dialog({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open, onOpenChange]);
+
+  // マウント前、または open=false のときは何もレンダリングしない
+  if (!mounted || !open) return null;
 
   const maxWidthClass =
     maxWidth === "sm"
@@ -73,6 +79,7 @@ export function Dialog({
           <button
             onClick={() => onOpenChange(false)}
             className="rounded-full p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 transition-colors shrink-0"
+            aria-label="ダイアログを閉じる"
           >
             <X className="h-4 w-4" />
           </button>
