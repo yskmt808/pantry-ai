@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { QRCodeSVG } from "qrcode.react";
 import {
   getHouseholdInfo,
   updateHouseholdName,
@@ -25,6 +26,7 @@ import {
   Link,
   ArrowRightLeft,
   UserCheck,
+  QrCode,
 } from "lucide-react";
 
 interface HouseholdSettingsDialogProps {
@@ -46,11 +48,18 @@ export function HouseholdSettingsDialog({
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [origin, setOrigin] = useState("");
 
   // 別の世帯への参加用ステート
   const [showJoinSection, setShowJoinSection] = useState(false);
   const [targetJoinId, setTargetJoinId] = useState("");
   const [joining, setJoining] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOrigin(window.location.origin);
+    }
+  }, []);
 
   const fetchInfo = async () => {
     try {
@@ -77,6 +86,8 @@ export function HouseholdSettingsDialog({
     }
   }, [open]);
 
+  const inviteUrl = household ? `${origin}/?join=${household.id}` : "";
+
   const handleCopyId = async () => {
     if (!household?.id) return;
     try {
@@ -89,10 +100,9 @@ export function HouseholdSettingsDialog({
   };
 
   const handleCopyInviteLink = async () => {
-    if (!household?.id) return;
+    if (!inviteUrl) return;
     try {
-      const url = `${window.location.origin}/?join=${household.id}`;
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(inviteUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     } catch {
@@ -234,53 +244,83 @@ export function HouseholdSettingsDialog({
               )}
             </div>
 
-            {/* 2. 家族メンバーを招待するセクション */}
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 dark:border-emerald-500/20 space-y-2.5">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                <UserPlus className="h-4 w-4 text-emerald-600" />
-                <span>家族メンバーを招待・追加</span>
+            {/* 2. 家族メンバーを招待するセクション (QRコード & リンク共有) */}
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 dark:border-emerald-500/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                  <QrCode className="h-4 w-4 text-emerald-600" />
+                  <span>家族メンバーをQRコードで招待・追加</span>
+                </div>
+                {isSharedDevice && (
+                  <Badge variant="default" className="text-[10px] bg-emerald-600">
+                    共有端末で表示中
+                  </Badge>
+                )}
               </div>
-              <p className="text-xs text-neutral-600 dark:text-neutral-300">
-                ご家族のスマホでGoogleログイン後、以下の招待URLを開くか世帯IDを入力すると、同じパントリーの在庫をリアルタイム共有できます。
-              </p>
 
-              <div className="flex flex-col sm:flex-row gap-2 pt-1">
-                <Button
-                  onClick={handleCopyInviteLink}
-                  size="sm"
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-semibold shadow-sm"
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="h-3.5 w-3.5" />
-                      <span>招待リンクをコピーしました</span>
-                    </>
-                  ) : (
-                    <>
-                      <Link className="h-3.5 w-3.5" />
-                      <span>招待リンクをコピー (LINE等で送る)</span>
-                    </>
-                  )}
-                </Button>
+              {/* QRコードとガイダンスの2カラム */}
+              <div className="flex flex-col sm:flex-row items-center gap-3.5">
+                {/* 左側: 世帯参加 QRコード */}
+                {inviteUrl && (
+                  <div className="p-2 rounded-2xl bg-white shadow-sm border border-emerald-500/20 flex flex-col items-center shrink-0">
+                    <QRCodeSVG
+                      value={inviteUrl}
+                      size={120}
+                      level="M"
+                      includeMargin={false}
+                      className="rounded-lg"
+                    />
+                    <span className="mt-1 text-[9px] font-bold text-neutral-500">
+                      スマホのカメラでスキャン
+                    </span>
+                  </div>
+                )}
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopyId}
-                  className="border-neutral-300 dark:border-neutral-700 gap-1.5 text-xs shrink-0"
-                >
-                  {copiedId ? (
-                    <>
-                      <Check className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>IDコピー完了</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3.5 w-3.5 text-neutral-500" />
-                      <span>世帯IDをコピー</span>
-                    </>
-                  )}
-                </Button>
+                {/* 右側: ガイダンスと共有ボタン */}
+                <div className="flex-1 space-y-2 text-left w-full">
+                  <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-snug">
+                    ご家族のスマホで上のQRコードを読み取るか、招待リンクを開いてGoogleログインすると、この世帯のパントリーに自動合流できます。
+                  </p>
+
+                  <div className="flex flex-col gap-1.5 pt-0.5">
+                    <Button
+                      onClick={handleCopyInviteLink}
+                      size="sm"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 text-xs font-semibold shadow-sm h-8"
+                    >
+                      {copiedLink ? (
+                        <>
+                          <Check className="h-3.5 w-3.5" />
+                          <span>招待リンクをコピーしました</span>
+                        </>
+                      ) : (
+                        <>
+                          <Link className="h-3.5 w-3.5" />
+                          <span>招待リンクをコピー (LINE等で送る)</span>
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyId}
+                      className="w-full border-neutral-300 dark:border-neutral-700 gap-1.5 text-xs h-7"
+                    >
+                      {copiedId ? (
+                        <>
+                          <Check className="h-3 w-3 text-emerald-600" />
+                          <span>世帯IDコピー完了</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3 text-neutral-500" />
+                          <span>世帯IDのみをコピー</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
               </div>
 
               <div className="rounded-lg bg-white/80 dark:bg-neutral-900/80 p-2 font-mono text-[10px] text-neutral-600 dark:text-neutral-400 break-all select-all border border-emerald-500/20">
