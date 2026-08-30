@@ -9,6 +9,7 @@ interface DialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  maxWidth?: "sm" | "md" | "lg" | "xl";
   children: React.ReactNode;
 }
 
@@ -17,6 +18,7 @@ export function Dialog({
   onOpenChange,
   title,
   description,
+  maxWidth = "md",
   children,
 }: DialogProps) {
   const [mounted, setMounted] = React.useState(false);
@@ -38,7 +40,14 @@ export function Dialog({
     };
   }, [open, onOpenChange]);
 
-  if (!open || !mounted) return null;
+  const maxWidthClass =
+    maxWidth === "sm"
+      ? "max-w-sm"
+      : maxWidth === "lg"
+      ? "max-w-lg"
+      : maxWidth === "xl"
+      ? "max-w-xl"
+      : "max-w-md";
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
@@ -49,7 +58,7 @@ export function Dialog({
       />
 
       {/* 2. Modal Box: body直下Portalにより最前面に完全独立して中央配置 */}
-      <div className="relative z-10 w-full max-w-md my-auto rounded-3xl border border-neutral-200 bg-white p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 duration-150 dark:border-neutral-800 dark:bg-neutral-900 max-h-[90vh] overflow-y-auto">
+      <div className={`relative z-10 w-full ${maxWidthClass} my-auto rounded-3xl border border-neutral-200 bg-white p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 duration-150 dark:border-neutral-800 dark:bg-neutral-900 max-h-[90vh] overflow-y-auto`}>
         <div className="flex items-start justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
           <div className="pr-2">
             <h3 className="text-base sm:text-lg font-bold tracking-tight text-neutral-900 dark:text-neutral-100">

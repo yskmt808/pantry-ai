@@ -160,10 +160,11 @@ export function HouseholdSettingsDialog({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
+      maxWidth="lg"
       title="⚙️ 世帯設定 & メンバー招待"
       description="家族メンバーの招待・世帯名設定・アプリ情報"
     >
-      <div className="space-y-4 pt-1 text-sm max-h-[80vh] overflow-y-auto pr-1">
+      <div className="space-y-3.5 pt-1 text-sm max-h-[85vh] overflow-y-auto pr-1">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent mb-2" />
@@ -188,7 +189,7 @@ export function HouseholdSettingsDialog({
             )}
 
             {/* 1. 世帯名 */}
-            <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/50 p-3.5 dark:border-neutral-800 dark:bg-neutral-800/40 space-y-2">
+            <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40 space-y-1.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-700 dark:text-neutral-300">
                   <Home className="h-3.5 w-3.5 text-emerald-600" />
@@ -199,7 +200,7 @@ export function HouseholdSettingsDialog({
                     variant="ghost"
                     size="sm"
                     onClick={() => setEditingName(true)}
-                    className="h-7 px-2 text-xs gap-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+                    className="h-6 px-2 text-xs gap-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
                   >
                     <Edit2 className="h-3 w-3" />
                     <span>変更</span>
@@ -208,12 +209,12 @@ export function HouseholdSettingsDialog({
               </div>
 
               {editingName ? (
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex items-center gap-2 pt-0.5">
                   <input
                     type="text"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    className="flex-1 rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-emerald-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+                    className="flex-1 rounded-xl border border-neutral-300 bg-white px-3 py-1 text-sm font-semibold text-neutral-900 focus:border-emerald-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
                     placeholder="例: 山田家のパントリー"
                     autoFocus
                   />
@@ -221,7 +222,7 @@ export function HouseholdSettingsDialog({
                     size="sm"
                     onClick={handleSaveName}
                     disabled={saving}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 h-8"
                   >
                     <Save className="h-3.5 w-3.5" />
                     <span>保存</span>
@@ -229,6 +230,7 @@ export function HouseholdSettingsDialog({
                   <Button
                     size="sm"
                     variant="outline"
+                    className="h-8"
                     onClick={() => {
                       setEditingName(false);
                       setNewName(household.name);
@@ -245,7 +247,7 @@ export function HouseholdSettingsDialog({
             </div>
 
             {/* 2. 家族メンバーを招待するセクション (QRコード & リンク共有) */}
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 dark:border-emerald-500/20 space-y-3">
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3 sm:p-4 dark:border-emerald-500/20 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
                   <QrCode className="h-4 w-4 text-emerald-600" />
@@ -253,33 +255,33 @@ export function HouseholdSettingsDialog({
                 </div>
                 {isSharedDevice && (
                   <Badge variant="default" className="text-[10px] bg-emerald-600">
-                    共有端末で表示中
+                    共有端末
                   </Badge>
                 )}
               </div>
 
               {/* QRコードとガイダンスの2カラム */}
-              <div className="flex flex-col sm:flex-row items-center gap-3.5">
+              <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
                 {/* 左側: 世帯参加 QRコード */}
                 {inviteUrl && (
                   <div className="p-2 rounded-2xl bg-white shadow-sm border border-emerald-500/20 flex flex-col items-center shrink-0">
                     <QRCodeSVG
                       value={inviteUrl}
-                      size={120}
+                      size={105}
                       level="M"
                       includeMargin={false}
                       className="rounded-lg"
                     />
                     <span className="mt-1 text-[9px] font-bold text-neutral-500">
-                      スマホのカメラでスキャン
+                      スマホでスキャン
                     </span>
                   </div>
                 )}
 
                 {/* 右側: ガイダンスと共有ボタン */}
                 <div className="flex-1 space-y-2 text-left w-full">
-                  <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-snug">
-                    ご家族のスマホで上のQRコードを読み取るか、招待リンクを開いてGoogleログインすると、この世帯のパントリーに自動合流できます。
+                  <p className="text-[11px] sm:text-xs text-neutral-600 dark:text-neutral-300 leading-snug">
+                    ご家族のスマホでQRコードを読み取るか、招待リンクを開いてGoogleログインすると、この世帯のパントリーに自動合流できます。
                   </p>
 
                   <div className="flex flex-col gap-1.5 pt-0.5">
