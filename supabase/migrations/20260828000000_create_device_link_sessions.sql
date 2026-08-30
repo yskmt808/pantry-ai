@@ -16,25 +16,26 @@ CREATE TABLE IF NOT EXISTS public.device_link_sessions (
 -- Enable RLS
 ALTER TABLE public.device_link_sessions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if any
+DROP POLICY IF EXISTS "Allow anyone to initiate device link session" ON public.device_link_sessions;
+DROP POLICY IF EXISTS "Allow reading session by device_code" ON public.device_link_sessions;
+DROP POLICY IF EXISTS "Allow authenticated users to approve session" ON public.device_link_sessions;
+DROP POLICY IF EXISTS "Allow consuming approved session" ON public.device_link_sessions;
+DROP POLICY IF EXISTS "Allow updating device link session" ON public.device_link_sessions;
+
 -- Policies:
 -- 1. Anyone (even unauthenticated shared device) can insert a pending session
 CREATE POLICY "Allow anyone to initiate device link session"
     ON public.device_link_sessions FOR INSERT
     WITH CHECK (status = 'pending');
 
--- 2. Anyone can read a session by device_code (to check pending/approved status)
+-- 2. Anyone can read a session by device_code
 CREATE POLICY "Allow reading session by device_code"
     ON public.device_link_sessions FOR SELECT
     USING (true);
 
--- 3. Authenticated users can approve a session
-CREATE POLICY "Allow authenticated users to approve session"
-    ON public.device_link_sessions FOR UPDATE
-    USING (auth.role() = 'authenticated')
-    WITH CHECK (auth.role() = 'authenticated');
-
--- 4. Allow updating status to 'consumed'
-CREATE POLICY "Allow consuming approved session"
+-- 3. Allow updating sessions (both approve by authenticated user and consume by shared device)
+CREATE POLICY "Allow updating device link session"
     ON public.device_link_sessions FOR UPDATE
     USING (true)
     WITH CHECK (true);

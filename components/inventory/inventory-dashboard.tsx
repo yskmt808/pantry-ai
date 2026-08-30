@@ -38,6 +38,7 @@ import {
 interface InventoryDashboardProps {
   initialItems: ItemWithDetails[];
   user: User | null;
+  isSharedDevice?: boolean;
 }
 
 // 未ログイン時用のデモデータ
@@ -270,9 +271,14 @@ const DEMO_ITEMS: ItemWithDetails[] = [
   },
 ];
 
-export function InventoryDashboard({ initialItems, user }: InventoryDashboardProps) {
+export function InventoryDashboard({
+  initialItems,
+  user,
+  isSharedDevice = false,
+}: InventoryDashboardProps) {
+  const isLoggedIn = !!user || isSharedDevice;
   const [items, setItems] = useState<ItemWithDetails[]>(
-    user ? initialItems : DEMO_ITEMS
+    isLoggedIn ? initialItems : DEMO_ITEMS
   );
   const [selectedLocation, setSelectedLocation] = useState<LocationType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -703,7 +709,7 @@ export function InventoryDashboard({ initialItems, user }: InventoryDashboardPro
   const handleDelete = async (id: string) => {
     if (!confirm("この品目を削除しますか？関連するすべての在庫ロットも削除されます。")) return;
     setItems((prev) => prev.filter((it) => it.id !== id));
-    if (user) {
+    if (isLoggedIn) {
       await deleteItem(id);
     }
   };
@@ -711,7 +717,7 @@ export function InventoryDashboard({ initialItems, user }: InventoryDashboardPro
   return (
     <div className="space-y-6">
       {/* 未ログイン時のデモバナー */}
-      {!user && (
+      {!isLoggedIn && (
         <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-teal-500/10 p-4 sm:p-5 dark:border-emerald-500/20">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">

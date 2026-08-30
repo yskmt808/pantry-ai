@@ -40,23 +40,79 @@ export type BatchInput = {
   purchased_at?: string | null;
 };
 
+import { cookies } from "next/headers";
+
+/**
+ * ログインユーザーまたは共有端末クッキーから世帯IDを取得
+ */
+export async function getEffectiveHousehold(supabaseClient?: Awaited<ReturnType<typeof createClient>>): Promise<{
+  householdId: string | null;
+  userId: string | null;
+  isSharedDevice: boolean;
+}> {
+  const supabase = supabaseClient || (await createClient());
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const { data: userProfile } = await supabase
+        .from("users")
+        .select("household_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const profile = userProfile as unknown as { household_id: string | null } | null;
+      if (profile?.household_id) {
+        return {
+          householdId: profile.household_id,
+          userId: user.id,
+          isSharedDevice: false,
+        };
+      }
+    }
+  } catch {
+    // auth.getUser failed or test environment
+  }
+
+  // 共有端末セッションクッキーの確認
+  try {
+    const cookieStore = await cookies();
+    const isShared = cookieStore.get("pantry_shared_device")?.value === "true";
+    const sharedHouseholdId = cookieStore.get("pantry_household_id")?.value;
+
+    if (isShared && sharedHouseholdId) {
+      return {
+        householdId: sharedHouseholdId,
+        userId: null,
+        isSharedDevice: true,
+      };
+    }
+  } catch {
+    // cookies() unavailable in tests
+  }
+
+  return { householdId: null, userId: null, isSharedDevice: false };
+}
+
 /**
  * 在庫アイテム一覧（ロットと調達先を含む）の取得
  */
 export async function getItems(location?: LocationType): Promise<ItemWithDetails[]> {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { householdId } = await getEffectiveHousehold(supabase);
 
-    if (!user) {
+    if (!householdId) {
       return [];
     }
 
     let query = supabase
       .from("items")
       .select("*, item_procurement_channels(*), item_batches(*)")
+      .eq("household_id", householdId)
       .order("created_at", { ascending: false });
 
     if (location) {
@@ -91,24 +147,10 @@ export async function getItems(location?: LocationType): Promise<ItemWithDetails
  */
 export async function createItem(input: ItemInput) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { householdId } = await getEffectiveHousehold(supabase);
 
-  if (!user) {
-    throw new Error("ログインが必要です");
-  }
-
-  const { data: userProfile, error: userError } = await supabase
-    .from("users")
-    .select("household_id")
-    .eq("id", user.id)
-    .single();
-
-  const householdId = (userProfile as { household_id: string | null } | null)?.household_id;
-
-  if (userError || !householdId) {
-    throw new Error("世帯情報が見つかりません");
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
   }
 
   const itemPayload: Database["public"]["Tables"]["items"]["Insert"] = {

@@ -117,12 +117,11 @@ export async function checkDeviceLinkStatus(
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("device_link_sessions")
-      .select("*, households(name)")
+      .select("status, expires_at, household_id")
       .eq("device_code", deviceCode)
       .single();
 
     if (error || !data) {
-      // デモストレージ確認
       const demo = demoSessions.get(deviceCode);
       if (demo) {
         if (Date.now() > demo.expiresAt) {
@@ -136,7 +135,7 @@ export async function checkDeviceLinkStatus(
     const session = data as unknown as {
       status: "pending" | "approved" | "consumed" | "expired";
       expires_at: string;
-      households?: { name: string } | null;
+      household_id: string | null;
     };
 
     if (new Date(session.expires_at).getTime() < Date.now()) {
@@ -145,7 +144,7 @@ export async function checkDeviceLinkStatus(
 
     return {
       status: session.status,
-      householdName: session.households?.name || "我が家のパントリー",
+      householdName: "我が家のパントリー",
     };
   } catch {
     const demo = demoSessions.get(deviceCode);
@@ -242,51 +241,86 @@ export async function getDeviceLinkSessionInfo(
 export async function authorizeDeviceLink(
   deviceCode: string
 ): Promise<{ success: boolean; householdName?: string; error?: string }> {
-  let householdId = "household-demo-1";
-  let householdName = "我が家のパントリー";
-
   try {
     const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (user) {
-      const { data: userProfile } = await supabase
-        .from("users")
-        .select("household_id, households(name)")
-        .eq("id", user.id)
+    if (!user) {
+      return {
+        success: false,
+        error: "ログインが必要です。先にGoogleログインを行ってください。",
+      };
+    }
+
+    // ユーザーの世帯情報を取得または自動生成
+    let householdId: string | null = null;
+    let householdName = "我が家のパントリー";
+
+    const { data: userProfile } = await supabase
+      .from("users")
+      .select("household_id, households(name)")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const profile = userProfile as unknown as {
+      household_id: string | null;
+      households: { name: string } | null;
+    } | null;
+
+    if (profile?.household_id) {
+      householdId = profile.household_id;
+      householdName = profile.households?.name || "我が家のパントリー";
+    } else {
+      // ユーザーの世帯レコードが存在しない場合は新規作成
+      const userName = user.user_metadata?.full_name || user.user_metadata?.name || "我が家";
+      const { data: newHousehold, error: hhErr } = await supabase
+        .from("households")
+        .insert({ name: `${userName}のパントリー` } as unknown as never)
+        .select("id, name")
         .single();
 
-      const profile = userProfile as unknown as {
-        household_id: string;
-        households: { name: string } | null;
-      } | null;
+      if (newHousehold && !hhErr) {
+        const hh = newHousehold as unknown as { id: string; name: string };
+        householdId = hh.id;
+        householdName = hh.name;
 
-      if (profile?.household_id) {
-        householdId = profile.household_id;
-        householdName = profile.households?.name || "我が家のパントリー";
+        // users プロファイルを更新または挿入
+        await supabase.from("users").upsert({
+          id: user.id,
+          household_id: householdId,
+          full_name: userName,
+          avatar_url: user.user_metadata?.avatar_url || null,
+          role: "owner",
+        } as unknown as never);
       }
     }
 
+    if (!householdId) {
+      return {
+        success: false,
+        error: "世帯情報の取得・作成に失敗しました",
+      };
+    }
+
     // セッションを approved に更新
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from("device_link_sessions")
       .update({
         status: "approved",
         household_id: householdId,
-        authorized_user_id: user?.id || null,
+        authorized_user_id: user.id,
         updated_at: new Date().toISOString(),
       } as unknown as never)
       .eq("device_code", deviceCode);
 
-    if (error) {
-      const demo = demoSessions.get(deviceCode);
-      if (demo) {
-        demo.status = "approved";
-        demo.householdId = householdId;
-        demo.householdName = householdName;
-      }
+    if (updateError) {
+      console.error("Failed to approve device link session:", updateError);
+      return {
+        success: false,
+        error: `承認の更新に失敗しました: ${updateError.message}`,
+      };
     }
 
     return { success: true, householdName };
@@ -294,9 +328,9 @@ export async function authorizeDeviceLink(
     const demo = demoSessions.get(deviceCode);
     if (demo) {
       demo.status = "approved";
-      demo.householdId = householdId;
-      demo.householdName = householdName;
-      return { success: true, householdName };
+      demo.householdId = "household-demo-1";
+      demo.householdName = "我が家のパントリー";
+      return { success: true, householdName: demo.householdName };
     }
     return {
       success: false,
@@ -313,47 +347,51 @@ export async function consumeDeviceLink(
 ): Promise<{ success: boolean; householdId?: string; error?: string }> {
   try {
     const supabase = await createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("device_link_sessions")
-      .select("*, households(*)")
+      .select("household_id, status")
       .eq("device_code", deviceCode)
       .single();
 
-    const sessionRow = data as unknown as {
-      household_id: string | null;
-    } | null;
-
-    let householdId = "household-demo-1";
-
-    if (sessionRow?.household_id) {
-      householdId = sessionRow.household_id;
-      // status を consumed に更新
-      await supabase
-        .from("device_link_sessions")
-        .update({
-          status: "consumed",
-          updated_at: new Date().toISOString(),
-        } as unknown as never)
-        .eq("device_code", deviceCode);
-    } else {
-      const demo = demoSessions.get(deviceCode);
-      if (demo) {
-        demo.status = "consumed";
-        householdId = demo.householdId;
-      }
+    if (error || !data) {
+      return { success: false, error: "セッションが見つかりません" };
     }
 
-    // 共有端末用クッキーを設定 (httpOnly, secure, sameSite=lax でセキュア化)
+    const sessionRow = data as unknown as {
+      household_id: string | null;
+      status: string;
+    };
+
+    if (!sessionRow.household_id) {
+      return { success: false, error: "世帯が紐付けられていません" };
+    }
+
+    const householdId = sessionRow.household_id;
+
+    // status を consumed に更新
+    await supabase
+      .from("device_link_sessions")
+      .update({
+        status: "consumed",
+        updated_at: new Date().toISOString(),
+      } as unknown as never)
+      .eq("device_code", deviceCode);
+
+    // 共有端末用クッキーを設定
     try {
       const isProd = process.env.NODE_ENV === "production";
       const cookieStore = await cookies();
+
+      // クライアントJSからも判別できるフラグクッキー (httpOnly: false)
       cookieStore.set("pantry_shared_device", "true", {
         path: "/",
         maxAge: 60 * 60 * 24 * 365, // 1年間有効
         sameSite: "lax",
-        httpOnly: true,
+        httpOnly: false,
         secure: isProd,
       });
+
+      // サーバーサイド専用のセキュアクッキー (httpOnly: true)
       cookieStore.set("pantry_household_id", householdId, {
         path: "/",
         maxAge: 60 * 60 * 24 * 365,

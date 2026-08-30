@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getItems } from "@/app/actions/items";
+import { getItems, getEffectiveHousehold } from "@/app/actions/items";
 import { InventoryDashboard } from "@/components/inventory/inventory-dashboard";
 
 export default async function HomePage() {
@@ -8,7 +8,10 @@ export default async function HomePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const items = user ? await getItems() : [];
+  const { isSharedDevice } = await getEffectiveHousehold(supabase);
+  const isAuthenticated = !!user || isSharedDevice;
+
+  const items = isAuthenticated ? await getItems() : [];
 
   return (
     <main>
@@ -21,7 +24,11 @@ export default async function HomePage() {
         </p>
       </div>
 
-      <InventoryDashboard initialItems={items} user={user} />
+      <InventoryDashboard
+        initialItems={items}
+        user={user}
+        isSharedDevice={isSharedDevice}
+      />
     </main>
   );
 }

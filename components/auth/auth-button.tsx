@@ -11,18 +11,21 @@ import type { User } from "@supabase/supabase-js";
 
 interface AuthButtonProps {
   user: User | null;
+  isSharedDevice?: boolean;
 }
 
-export function AuthButton({ user }: AuthButtonProps) {
+export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false }: AuthButtonProps) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [isSharedDevice, setIsSharedDevice] = useState(false);
+  const [isSharedDevice, setIsSharedDevice] = useState(initialIsSharedDevice);
 
   useEffect(() => {
     if (typeof document !== "undefined") {
-      setIsSharedDevice(document.cookie.includes("pantry_shared_device=true"));
+      setIsSharedDevice(
+        initialIsSharedDevice || document.cookie.includes("pantry_shared_device=true")
+      );
     }
-  }, []);
+  }, [initialIsSharedDevice]);
 
   const handleLogout = async () => {
     try {

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveHousehold } from "@/app/actions/items";
 import { AuthButton } from "@/components/auth/auth-button";
-import { Sparkles, Refrigerator } from "lucide-react";
+import { Refrigerator } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "pantry-ai | 家庭内在庫管理 & AI執事",
@@ -19,6 +20,8 @@ export default async function RootLayout({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const { isSharedDevice } = await getEffectiveHousehold(supabase);
 
   return (
     <html lang="ja">
@@ -43,7 +46,7 @@ export default async function RootLayout({
 
             {/* Auth Actions */}
             <div className="flex items-center gap-3">
-              <AuthButton user={user} />
+              <AuthButton user={user} isSharedDevice={isSharedDevice} />
             </div>
           </div>
         </header>
