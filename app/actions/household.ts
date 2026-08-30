@@ -126,3 +126,87 @@ export async function updateHouseholdName(
     };
   }
 }
+
+/**
+ * 招待された世帯（householdId）に現在のログインユーザーを参加させる
+ */
+export async function joinHousehold(
+  targetHouseholdId: string
+): Promise<{ success: boolean; householdName?: string; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const admin = createAdminClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { success: false, error: "世帯に参加するにはGoogleログインが必要です" };
+    }
+
+    const cleanId = targetHouseholdId.trim();
+    if (!cleanId) {
+      return { success: false, error: "世帯IDを入力してください" };
+    }
+
+    // 対象世帯の存在確認
+    const { data: targetHh, error: hhErr } = await admin
+      .from("households")
+      .select("id, name")
+      .eq("id", cleanId)
+      .single();
+
+    if (hhErr || !targetHh) {
+      return {
+        success: false,
+        error: "指定された世帯が見つかりませんでした。世帯IDをご確認ください。",
+      };
+    }
+
+    // users レコードの household_id を更新（存在しない場合は挿入）
+    const { data: existingUser } = await admin
+      .from("users")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (existingUser) {
+      const { error: userErr } = await admin
+        .from("users")
+        .update({
+          household_id: targetHh.id,
+          role: "member",
+          updated_at: new Date().toISOString(),
+        } as unknown as never)
+        .eq("id", user.id);
+
+      if (userErr) {
+        return { success: false, error: `参加に失敗しました: ${userErr.message}` };
+      }
+    } else {
+      const { error: insertErr } = await admin
+        .from("users")
+        .insert([
+          {
+            id: user.id,
+            household_id: targetHh.id,
+            role: "member",
+            full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+            avatar_url: user.user_metadata?.avatar_url || null,
+          },
+        ] as unknown as never);
+
+      if (insertErr) {
+        return { success: false, error: `参加に失敗しました: ${insertErr.message}` };
+      }
+    }
+
+    revalidatePath("/");
+    return { success: true, householdName: targetHh.name };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "世帯への参加処理中にエラーが発生しました",
+    };
+  }
+}
