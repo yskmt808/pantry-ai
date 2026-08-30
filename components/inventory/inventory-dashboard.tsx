@@ -23,6 +23,7 @@ import {
   addBatch,
   deleteBatch,
   openBatch,
+  processBatch,
 } from "@/app/actions/items";
 import { sortBatchesForConsumption } from "@/lib/utils/batch-sorter";
 import type { LocationType } from "@/lib/supabase/types";
@@ -546,40 +547,19 @@ export function InventoryDashboard({
       return;
     }
 
-    const res = await openBatch(batchId, itemId);
-    if (res.split && res.openedBatch && res.remainingBatch) {
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.id === itemId) {
-            const nextBatches = (item.item_batches || []).map((b) =>
-              b.id === batchId ? res.remainingBatch : b
-            );
-            const sorted = sortBatchesForConsumption(
-              [res.openedBatch, ...nextBatches] as unknown as ItemBatch[],
-              item.track_expiry
-            );
-            return {
-              ...item,
-              item_batches: sorted,
-            };
-          }
-          return item;
-        })
-      );
-    } else {
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.id === itemId) {
-            const updatedBatches = (item.item_batches || []).map((b) =>
-              b.id === batchId ? { ...b, opened_at: todayStr } : b
-            );
-            const sorted = sortBatchesForConsumption(updatedBatches, item.track_expiry);
-            return { ...item, item_batches: sorted };
-          }
-          return item;
-        })
-      );
-    }
+    await openBatch(batchId);
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === itemId) {
+          const updatedBatches = (item.item_batches || []).map((b) =>
+            b.id === batchId ? { ...b, opened_at: todayStr } : b
+          );
+          const sorted = sortBatchesForConsumption(updatedBatches, item.track_expiry);
+          return { ...item, item_batches: sorted };
+        }
+        return item;
+      })
+    );
   };
 
   // ロット処理（使い切り・廃棄・誤登録取消）ハンドラ
@@ -604,8 +584,8 @@ export function InventoryDashboard({
       })
     );
 
-    if (user) {
-      await deleteBatch(batchId, itemId, reason);
+    if (isLoggedIn) {
+      await processBatch(itemId, batchId, reason);
     }
   };
 

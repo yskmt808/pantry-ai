@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import type { Database, LocationType, ChannelType } from "@/lib/supabase/types";
 import { sortBatchesForConsumption } from "@/lib/utils/batch-sorter";
@@ -40,7 +42,7 @@ export type BatchInput = {
   purchased_at?: string | null;
 };
 
-import { cookies } from "next/headers";
+export type BatchProcessReason = "consumption" | "waste" | "correction";
 
 /**
  * ログインユーザーまたは共有端末クッキーから世帯IDを取得
@@ -58,7 +60,8 @@ export async function getEffectiveHousehold(supabaseClient?: Awaited<ReturnType<
     } = await supabase.auth.getUser();
 
     if (user) {
-      const { data: userProfile } = await supabase
+      const admin = createAdminClient();
+      const { data: userProfile } = await admin
         .from("users")
         .select("household_id")
         .eq("id", user.id)
@@ -103,13 +106,14 @@ export async function getEffectiveHousehold(supabaseClient?: Awaited<ReturnType<
 export async function getItems(location?: LocationType): Promise<ItemWithDetails[]> {
   try {
     const supabase = await createClient();
+    const admin = createAdminClient();
     const { householdId } = await getEffectiveHousehold(supabase);
 
     if (!householdId) {
       return [];
     }
 
-    let query = supabase
+    let query = admin
       .from("items")
       .select("*, item_procurement_channels(*), item_batches(*)")
       .eq("household_id", householdId)
@@ -147,6 +151,7 @@ export async function getItems(location?: LocationType): Promise<ItemWithDetails
  */
 export async function createItem(input: ItemInput) {
   const supabase = await createClient();
+  const admin = createAdminClient();
   const { householdId } = await getEffectiveHousehold(supabase);
 
   if (!householdId) {
@@ -170,7 +175,7 @@ export async function createItem(input: ItemInput) {
     memo: input.memo || null,
   };
 
-  const { data: itemData, error: itemError } = await supabase
+  const { data: itemData, error: itemError } = await admin
     .from("items")
     .insert([itemPayload] as unknown as never)
     .select()
@@ -192,7 +197,7 @@ export async function createItem(input: ItemInput) {
       unit_price: input.channel.unit_price || null,
       is_default: true,
     };
-    const { data: cData } = await supabase
+    const { data: cData } = await admin
       .from("item_procurement_channels")
       .insert([channelPayload] as unknown as never)
       .select()
@@ -215,18 +220,18 @@ export async function createItem(input: ItemInput) {
  */
 export async function addBatch(itemId: string, input: BatchInput) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const admin = createAdminClient();
+  const { householdId, userId } = await getEffectiveHousehold(supabase);
 
-  if (!user) {
-    throw new Error("ログインが必要です");
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
   }
 
-  const { data: itemData, error: itemError } = await supabase
+  const { data: itemData, error: itemError } = await admin
     .from("items")
     .select("*, item_batches(*)")
     .eq("id", itemId)
+    .eq("household_id", householdId)
     .single();
 
   if (itemError || !itemData) {
@@ -243,7 +248,7 @@ export async function addBatch(itemId: string, input: BatchInput) {
     purchased_at: input.purchased_at || new Date().toISOString().split("T")[0],
   };
 
-  const { data: newBatchData, error: batchError } = await supabase
+  const { data: newBatchData, error: batchError } = await admin
     .from("item_batches")
     .insert([batchPayload] as unknown as never)
     .select()
@@ -266,7 +271,7 @@ export async function addBatch(itemId: string, input: BatchInput) {
     earliestExpiry = sortedExpiries[0] || null;
   }
 
-  await supabase
+  await admin
     .from("items")
     .update({
       current_quantity: newTotal,
@@ -275,13 +280,13 @@ export async function addBatch(itemId: string, input: BatchInput) {
     } as unknown as never)
     .eq("id", itemId);
 
-  await supabase.from("inventory_logs").insert([
+  await admin.from("inventory_logs").insert([
     {
       household_id: item.household_id,
       item_id: itemId,
       change_amount: input.quantity,
       reason: "purchase",
-      created_by: user.id,
+      created_by: userId,
     },
   ] as unknown as never);
 
@@ -291,303 +296,179 @@ export async function addBatch(itemId: string, input: BatchInput) {
 
 /**
  * 数量の先入れ先出し（FIFO）自動消費 / クイック増減
- * 開封済みロットを最優先、次に古い期限/購入日のロットから自動減算
  */
 export async function adjustItemQuantity(itemId: string, delta: number) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const admin = createAdminClient();
+  const { householdId, userId } = await getEffectiveHousehold(supabase);
 
-  if (!user) {
-    throw new Error("ログインが必要です");
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
   }
 
-  const { data: itemData, error: fetchError } = await supabase
+  const { data: itemData, error: itemError } = await admin
     .from("items")
     .select("*, item_batches(*)")
     .eq("id", itemId)
+    .eq("household_id", householdId)
     .single();
 
-  if (fetchError || !itemData) {
+  if (itemError || !itemData) {
     throw new Error("アイテムが見つかりません");
   }
 
   const item = itemData as unknown as ItemWithDetails;
-  const batches = sortBatchesForConsumption(item.item_batches || [], item.track_expiry);
-
   const oldTotal = Number(item.current_quantity);
   const newTotal = Math.max(0, Number((oldTotal + delta).toFixed(2)));
 
+  const batches = item.item_batches || [];
+  let sortedBatches = sortBatchesForConsumption(batches, item.track_expiry);
+
   if (delta < 0) {
-    // 消費（FIFO: 開封済み優先 ➔ 古い期限/購入日順に減算）
     let remainingToDeduct = Math.abs(delta);
 
-    for (const batch of batches) {
+    for (const batch of sortedBatches) {
       if (remainingToDeduct <= 0.001) break;
-      const bQty = Number(batch.quantity);
 
-      if (bQty <= remainingToDeduct + 0.001) {
-        remainingToDeduct = Math.max(0, Number((remainingToDeduct - bQty).toFixed(2)));
-        await supabase.from("item_batches").delete().eq("id", batch.id);
+      const bQty = Number(batch.quantity);
+      if (bQty <= remainingToDeduct) {
+        remainingToDeduct = Number((remainingToDeduct - bQty).toFixed(2));
+        await admin.from("item_batches").delete().eq("id", batch.id);
       } else {
-        const updatedQty = Number((bQty - remainingToDeduct).toFixed(2));
+        const nextQty = Number((bQty - remainingToDeduct).toFixed(2));
         remainingToDeduct = 0;
-        await supabase
+        await admin
           .from("item_batches")
-          .update({ quantity: updatedQty } as unknown as never)
+          .update({ quantity: nextQty } as unknown as never)
           .eq("id", batch.id);
       }
     }
   } else if (delta > 0) {
-    // 加算
-    if (batches.length > 0) {
-      const lastBatch = batches[batches.length - 1];
-      const updatedQty = Number((Number(lastBatch.quantity) + delta).toFixed(2));
-      await supabase
+    const latestBatch = sortedBatches[sortedBatches.length - 1];
+    if (latestBatch) {
+      const nextQty = Number((Number(latestBatch.quantity) + delta).toFixed(2));
+      await admin
         .from("item_batches")
-        .update({ quantity: updatedQty } as unknown as never)
-        .eq("id", lastBatch.id);
+        .update({ quantity: nextQty } as unknown as never)
+        .eq("id", latestBatch.id);
     } else {
-      await supabase.from("item_batches").insert([
+      await admin.from("item_batches").insert([
         {
           item_id: itemId,
           quantity: delta,
-          expiry_date: item.track_expiry ? item.expiry_date : null,
+          expiry_date: null,
           purchased_at: new Date().toISOString().split("T")[0],
         },
       ] as unknown as never);
     }
   }
 
-  let nextEarliest: string | null = null;
-  if (item.track_expiry) {
-    const { data: remainingBatches } = await supabase
-      .from("item_batches")
-      .select("expiry_date")
-      .eq("item_id", itemId)
-      .order("expiry_date", { ascending: true, nullsFirst: false });
+  // 最新のロット一覧から最近の賞味期限を再計算
+  const { data: refreshedBatches } = await admin
+    .from("item_batches")
+    .select("*")
+    .eq("item_id", itemId);
 
-    nextEarliest = (remainingBatches as { expiry_date: string | null }[] | null)?.[0]?.expiry_date || null;
+  let earliestExpiry: string | null = null;
+  if (item.track_expiry && refreshedBatches && refreshedBatches.length > 0) {
+    const expiries = (refreshedBatches as ItemBatch[])
+      .map((b) => b.expiry_date)
+      .filter(Boolean)
+      .sort() as string[];
+    earliestExpiry = expiries[0] || null;
   }
 
-  await supabase
+  await admin
     .from("items")
     .update({
       current_quantity: newTotal,
-      expiry_date: nextEarliest,
+      expiry_date: earliestExpiry,
       updated_at: new Date().toISOString(),
     } as unknown as never)
     .eq("id", itemId);
 
-  await supabase.from("inventory_logs").insert([
+  await admin.from("inventory_logs").insert([
     {
       household_id: item.household_id,
       item_id: itemId,
       change_amount: delta,
-      reason: delta > 0 ? "purchase" : "consumption",
-      created_by: user.id,
+      reason: delta < 0 ? "consumption" : "manual_adjustment",
+      created_by: userId,
     },
   ] as unknown as never);
 
   revalidatePath("/");
-  return { success: true, newQuantity: newTotal, earliestExpiry: nextEarliest };
+  return { success: true, newQuantity: newTotal };
 }
 
 /**
- * ロットを開封済みに設定（数量が2以上の場合は1本分を分離して開封済みロットを作成）
- */
-export async function openBatch(batchId: string, itemId: string, openQuantity?: number) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new Error("ログインが必要です");
-  }
-
-  const { data: batchData, error: batchError } = await supabase
-    .from("item_batches")
-    .select("*, items(*)")
-    .eq("id", batchId)
-    .single();
-
-  if (batchError || !batchData) {
-    throw new Error("ロットが見つかりません");
-  }
-
-  const batch = batchData as unknown as ItemBatch & { items: Database["public"]["Tables"]["items"]["Row"] };
-  const todayStr = new Date().toISOString().split("T")[0];
-  const step = Number(batch.items?.consumption_step) || 1;
-  const qtyToOpen = openQuantity ? Math.min(Number(batch.quantity), openQuantity) : Math.min(Number(batch.quantity), step >= 1 ? 1 : step);
-  const currentQty = Number(batch.quantity);
-
-  if (currentQty <= qtyToOpen + 0.001) {
-    const { error } = await supabase
-      .from("item_batches")
-      .update({ opened_at: todayStr } as unknown as never)
-      .eq("id", batchId);
-
-    if (error) {
-      throw new Error(`開封日更新エラー: ${error.message}`);
-    }
-
-    revalidatePath("/");
-    return { success: true, openedBatchId: batchId, split: false };
-  } else {
-    const remainingQty = Number((currentQty - qtyToOpen).toFixed(2));
-
-    await supabase
-      .from("item_batches")
-      .update({ quantity: remainingQty } as unknown as never)
-      .eq("id", batchId);
-
-    const newBatchPayload: Database["public"]["Tables"]["item_batches"]["Insert"] = {
-      item_id: itemId,
-      quantity: qtyToOpen,
-      expiry_date: batch.expiry_date,
-      opened_at: todayStr,
-      purchased_at: batch.purchased_at,
-    };
-
-    const { data: newBatchData, error: insertError } = await supabase
-      .from("item_batches")
-      .insert([newBatchPayload] as unknown as never)
-      .select()
-      .single();
-
-    if (insertError || !newBatchData) {
-      throw new Error(`開封ロット作成エラー: ${insertError?.message}`);
-    }
-
-    revalidatePath("/");
-    return {
-      success: true,
-      split: true,
-      remainingBatch: { ...batch, quantity: remainingQty },
-      openedBatch: newBatchData as unknown as ItemBatch,
-    };
-  }
-}
-
-export type BatchProcessReason = "consumption" | "waste" | "correction";
-
-/**
- * ロットの処理・削除（消費完了、廃棄、誤登録取消）
- */
-export async function deleteBatch(
-  batchId: string,
-  itemId: string,
-  reason: BatchProcessReason = "consumption"
-) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new Error("ログインが必要です");
-  }
-
-  // 対象ロットと親アイテムを取得
-  const { data: batchData } = await supabase
-    .from("item_batches")
-    .select("*, items(*)")
-    .eq("id", batchId)
-    .single();
-
-  const batch = batchData as unknown as (ItemBatch & { items: Database["public"]["Tables"]["items"]["Row"] }) | null;
-  const householdId = batch?.items?.household_id;
-  const batchQty = batch ? Number(batch.quantity) : 0;
-
-  // ロット削除
-  await supabase.from("item_batches").delete().eq("id", batchId);
-
-  // 親アイテムの合計と期限を再集計
-  const { data: remBatches } = await supabase
-    .from("item_batches")
-    .select("quantity, expiry_date")
-    .eq("item_id", itemId)
-    .order("expiry_date", { ascending: true, nullsFirst: false });
-
-  const batches = (remBatches as { quantity: number; expiry_date: string | null }[]) || [];
-  const newTotal = Number(batches.reduce((sum, b) => sum + Number(b.quantity), 0).toFixed(2));
-  const nextEarliest = batches[0]?.expiry_date || null;
-
-  await supabase
-    .from("items")
-    .update({
-      current_quantity: newTotal,
-      expiry_date: nextEarliest,
-      updated_at: new Date().toISOString(),
-    } as unknown as never)
-    .eq("id", itemId);
-
-  // 在庫ログ記録（誤登録取消以外はログを残す）
-  if (householdId && batchQty > 0) {
-    if (reason === "consumption" || reason === "waste") {
-      await supabase.from("inventory_logs").insert([
-        {
-          household_id: householdId,
-          item_id: itemId,
-          change_amount: -batchQty,
-          reason: reason,
-          created_by: user.id,
-        },
-      ] as unknown as never);
-    } else if (reason === "correction") {
-      await supabase.from("inventory_logs").insert([
-        {
-          household_id: householdId,
-          item_id: itemId,
-          change_amount: -batchQty,
-          reason: "correction",
-          created_by: user.id,
-        },
-      ] as unknown as never);
-    }
-  }
-
-  revalidatePath("/");
-  return { success: true, newTotal };
-}
-
-/**
- * アイテム（品目マスタ）の更新
+ * アイテムの更新
  */
 export async function updateItem(itemId: string, input: Partial<ItemInput>) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const admin = createAdminClient();
+  const { householdId } = await getEffectiveHousehold(supabase);
 
-  if (!user) {
-    throw new Error("ログインが必要です");
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
   }
 
-  const updatePayload: Database["public"]["Tables"]["items"]["Update"] = {
-    name: input.name,
-    category: input.category,
-    location: input.location,
-    unit: input.unit,
-    min_quantity: input.min_quantity,
-    consumption_step: input.consumption_step,
-    package_quantity: input.package_quantity,
-    track_expiry: input.track_expiry,
-    track_opened: input.track_opened,
-    opened_shelf_life_days: input.opened_shelf_life_days,
-    memo: input.memo,
+  const payload: Database["public"]["Tables"]["items"]["Update"] = {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  if (input.name !== undefined) payload.name = input.name;
+  if (input.category !== undefined) payload.category = input.category;
+  if (input.location !== undefined) payload.location = input.location;
+  if (input.unit !== undefined) payload.unit = input.unit;
+  if (input.min_quantity !== undefined) payload.min_quantity = input.min_quantity;
+  if (input.consumption_step !== undefined) payload.consumption_step = input.consumption_step;
+  if (input.package_quantity !== undefined) payload.package_quantity = input.package_quantity;
+  if (input.track_expiry !== undefined) payload.track_expiry = input.track_expiry;
+  if (input.track_opened !== undefined) payload.track_opened = input.track_opened;
+  if (input.opened_shelf_life_days !== undefined) payload.opened_shelf_life_days = input.opened_shelf_life_days;
+  if (input.memo !== undefined) payload.memo = input.memo;
+
+  const { error } = await admin
     .from("items")
-    .update(updatePayload as unknown as never)
-    .eq("id", itemId);
+    .update(payload as unknown as never)
+    .eq("id", itemId)
+    .eq("household_id", householdId);
 
   if (error) {
     throw new Error(`アイテム更新エラー: ${error.message}`);
+  }
+
+  if (input.channel && input.channel.provider_name) {
+    const { data: existingChannel } = await admin
+      .from("item_procurement_channels")
+      .select("id")
+      .eq("item_id", itemId)
+      .eq("is_default", true)
+      .maybeSingle();
+
+    if (existingChannel) {
+      await admin
+        .from("item_procurement_channels")
+        .update({
+          channel_type: input.channel.channel_type,
+          provider_name: input.channel.provider_name,
+          url: input.channel.url || null,
+          unit_price: input.channel.unit_price || null,
+        } as unknown as never)
+        .eq("id", (existingChannel as { id: string }).id);
+    } else {
+      await admin.from("item_procurement_channels").insert([
+        {
+          item_id: itemId,
+          channel_type: input.channel.channel_type,
+          provider_name: input.channel.provider_name,
+          url: input.channel.url || null,
+          unit_price: input.channel.unit_price || null,
+          is_default: true,
+        },
+      ] as unknown as never);
+    }
   }
 
   revalidatePath("/");
@@ -599,15 +480,18 @@ export async function updateItem(itemId: string, input: Partial<ItemInput>) {
  */
 export async function deleteItem(itemId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const admin = createAdminClient();
+  const { householdId } = await getEffectiveHousehold(supabase);
 
-  if (!user) {
-    throw new Error("ログインが必要です");
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
   }
 
-  const { error } = await supabase.from("items").delete().eq("id", itemId);
+  const { error } = await admin
+    .from("items")
+    .delete()
+    .eq("id", itemId)
+    .eq("household_id", householdId);
 
   if (error) {
     throw new Error(`アイテム削除エラー: ${error.message}`);
@@ -615,4 +499,123 @@ export async function deleteItem(itemId: string) {
 
   revalidatePath("/");
   return { success: true };
+}
+
+/**
+ * 個別ロットの開封処理
+ */
+export async function openBatch(batchId: string) {
+  const supabase = await createClient();
+  const admin = createAdminClient();
+  const { householdId } = await getEffectiveHousehold(supabase);
+
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
+  }
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  const { error } = await admin
+    .from("item_batches")
+    .update({ opened_at: todayStr } as unknown as never)
+    .eq("id", batchId);
+
+  if (error) {
+    throw new Error(`開封日更新エラー: ${error.message}`);
+  }
+
+  revalidatePath("/");
+  return { success: true, openedAt: todayStr };
+}
+
+/**
+ * 個別ロットの処理（使い切り・廃棄・登録取消）
+ */
+export async function processBatch(
+  itemId: string,
+  batchId: string,
+  reason: BatchProcessReason
+) {
+  const supabase = await createClient();
+  const admin = createAdminClient();
+  const { householdId, userId } = await getEffectiveHousehold(supabase);
+
+  if (!householdId) {
+    throw new Error("ログインまたは共有端末の連携が必要です");
+  }
+
+  const { data: itemData, error: itemError } = await admin
+    .from("items")
+    .select("*, item_batches(*)")
+    .eq("id", itemId)
+    .eq("household_id", householdId)
+    .single();
+
+  if (itemError || !itemData) {
+    throw new Error("アイテムが見つかりません");
+  }
+
+  const item = itemData as unknown as ItemWithDetails;
+  const targetBatch = (item.item_batches || []).find((b) => b.id === batchId);
+
+  if (!targetBatch) {
+    throw new Error("対象のロットが見つかりません");
+  }
+
+  const removedQuantity = Number(targetBatch.quantity);
+  const newTotal = Math.max(0, Number((Number(item.current_quantity) - removedQuantity).toFixed(2)));
+
+  const { error: deleteError } = await admin
+    .from("item_batches")
+    .delete()
+    .eq("id", batchId);
+
+  if (deleteError) {
+    throw new Error(`ロット削除エラー: ${deleteError.message}`);
+  }
+
+  const remainingBatches = (item.item_batches || []).filter((b) => b.id !== batchId);
+  let earliestExpiry: string | null = null;
+  if (item.track_expiry && remainingBatches.length > 0) {
+    const expiries = remainingBatches
+      .map((b) => b.expiry_date)
+      .filter(Boolean)
+      .sort() as string[];
+    earliestExpiry = expiries[0] || null;
+  }
+
+  await admin
+    .from("items")
+    .update({
+      current_quantity: newTotal,
+      expiry_date: earliestExpiry,
+      updated_at: new Date().toISOString(),
+    } as unknown as never)
+    .eq("id", itemId);
+
+  let logReason = "consumption";
+  if (reason === "waste") {
+    logReason = "expired";
+  } else if (reason === "correction") {
+    logReason = "manual_adjustment";
+  }
+
+  await admin.from("inventory_logs").insert([
+    {
+      household_id: item.household_id,
+      item_id: itemId,
+      change_amount: -removedQuantity,
+      reason: logReason,
+      created_by: userId,
+    },
+  ] as unknown as never);
+
+  revalidatePath("/");
+  return { success: true, newQuantity: newTotal };
+}
+
+/**
+ * 個別ロットの削除
+ */
+export async function deleteBatch(itemId: string, batchId: string) {
+  return processBatch(itemId, batchId, "correction");
 }

@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LoginDialog } from "./login-dialog";
+import { HouseholdSettingsDialog } from "@/components/settings/household-settings-dialog";
 import { createClient } from "@/lib/supabase/client";
 import { logoutSharedDevice } from "@/app/actions/device-auth";
-import { LogIn, LogOut, User as UserIcon, Tablet } from "lucide-react";
+import { LogIn, LogOut, User as UserIcon, Tablet, Settings } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 
 interface AuthButtonProps {
@@ -16,6 +17,7 @@ interface AuthButtonProps {
 
 export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false }: AuthButtonProps) {
   const [loginOpen, setLoginOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isSharedDevice, setIsSharedDevice] = useState(initialIsSharedDevice);
 
@@ -45,7 +47,17 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
 
   if (!user && !isSharedDevice) {
     return (
-      <>
+      <div className="flex items-center gap-1.5">
+        <Button
+          onClick={() => setSettingsOpen(true)}
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          title="アプリ情報"
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
+
         <Button
           onClick={() => setLoginOpen(true)}
           size="sm"
@@ -54,8 +66,14 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
           <LogIn className="h-4 w-4" />
           <span>ログイン</span>
         </Button>
+
         <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
-      </>
+        <HouseholdSettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          isSharedDevice={false}
+        />
+      </div>
     );
   }
 
@@ -63,13 +81,30 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
   if (isSharedDevice && !user) {
     return (
       <div className="flex items-center gap-2">
-        <Badge
-          variant="outline"
-          className="flex items-center gap-1.5 py-1 px-2.5 bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 text-xs font-semibold"
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="cursor-pointer group flex items-center"
+          title="世帯設定とIDを確認"
         >
-          <Tablet className="h-3.5 w-3.5" />
-          <span>冷蔵庫端末 (世帯共有)</span>
-        </Badge>
+          <Badge
+            variant="outline"
+            className="flex items-center gap-1.5 py-1 px-2.5 bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 text-xs font-semibold group-hover:bg-emerald-100 transition-colors"
+          >
+            <Tablet className="h-3.5 w-3.5" />
+            <span>冷蔵庫端末 (世帯共有)</span>
+          </Badge>
+        </button>
+
+        <Button
+          onClick={() => setSettingsOpen(true)}
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          title="世帯設定・アプリ情報"
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
+
         <Button
           onClick={handleLogout}
           variant="ghost"
@@ -80,6 +115,12 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
         >
           <LogOut className="h-4 w-4" />
         </Button>
+
+        <HouseholdSettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          isSharedDevice={true}
+        />
       </div>
     );
   }
@@ -92,8 +133,12 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
     "ユーザー";
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setSettingsOpen(true)}
+        className="flex items-center gap-2 rounded-full p-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+        title="世帯設定・IDの確認"
+      >
         {avatarUrl ? (
           <img
             src={avatarUrl}
@@ -105,10 +150,20 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
             <UserIcon className="h-4 w-4" />
           </div>
         )}
-        <span className="hidden text-xs font-semibold text-neutral-800 dark:text-neutral-200 sm:inline-block max-w-[120px] truncate">
+        <span className="hidden text-xs font-semibold text-neutral-800 dark:text-neutral-200 sm:inline-block max-w-[120px] truncate pr-1">
           {displayName}
         </span>
-      </div>
+      </button>
+
+      <Button
+        onClick={() => setSettingsOpen(true)}
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+        title="世帯設定・アプリ情報"
+      >
+        <Settings className="h-4 w-4" />
+      </Button>
 
       <Button
         onClick={handleLogout}
@@ -120,7 +175,12 @@ export function AuthButton({ user, isSharedDevice: initialIsSharedDevice = false
       >
         <LogOut className="h-4 w-4" />
       </Button>
+
+      <HouseholdSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        isSharedDevice={false}
+      />
     </div>
   );
 }
-

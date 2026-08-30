@@ -401,6 +401,56 @@ export interface Database {
           }
         ];
       };
+      device_link_sessions: {
+        Row: {
+          id: string;
+          device_code: string;
+          user_code: string;
+          device_name: string;
+          household_id: string | null;
+          authorized_user_id: string | null;
+          status: "pending" | "approved" | "consumed" | "expired";
+          device_session_token: string | null;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          device_code: string;
+          user_code: string;
+          device_name?: string;
+          household_id?: string | null;
+          authorized_user_id?: string | null;
+          status?: "pending" | "approved" | "consumed" | "expired";
+          device_session_token?: string | null;
+          expires_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          device_code?: string;
+          user_code?: string;
+          device_name?: string;
+          household_id?: string | null;
+          authorized_user_id?: string | null;
+          status?: "pending" | "approved" | "consumed" | "expired";
+          device_session_token?: string | null;
+          expires_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "device_link_sessions_household_id_fkey";
+            columns: ["household_id"];
+            isOneToOne: false;
+            referencedRelation: "households";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
