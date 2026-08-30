@@ -42,7 +42,14 @@ export function SharedDeviceLoginDialog({
       setLoading(true);
       setStatus("loading");
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const res = await initiateDeviceLink("冷蔵庫の共有端末", origin);
+      const timeoutPromise = new Promise<{ success: false; error: string }>((_, reject) =>
+        setTimeout(() => reject(new Error("タイムアウト")), 8000)
+      );
+
+      const res = await Promise.race([
+        initiateDeviceLink("冷蔵庫の共有端末", origin),
+        timeoutPromise,
+      ]);
 
       if (res.success && res.data) {
         setSession(res.data);
@@ -51,7 +58,8 @@ export function SharedDeviceLoginDialog({
       } else {
         setStatus("expired");
       }
-    } catch {
+    } catch (err) {
+      console.error("Failed to start session:", err);
       setStatus("expired");
     } finally {
       setLoading(false);
