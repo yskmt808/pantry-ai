@@ -26,4 +26,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      - name: Run Vitest with inline reporters
+        run: npx vitest run --reporter=basic
