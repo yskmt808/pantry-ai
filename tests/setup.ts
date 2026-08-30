@@ -8,7 +8,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = "placeholder-service-role-key";
 process.env.NEXT_PUBLIC_SITE_URL = "http://localhost:3000";
 process.env.VITEST = "true";
 
-// jsdom 環境用ポリフィル (CI runner 安定化)
+// jsdom 環境用ポリフィル
 if (typeof window !== "undefined") {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -37,21 +37,39 @@ if (typeof window !== "undefined") {
   } as unknown as typeof IntersectionObserver;
 }
 
-// next/headers の cookies() をモック
-const mockCookiesStore = new Map<string, string>();
-vi.mock("next/headers", () => ({
-  cookies: vi.fn().mockImplementation(async () => ({
-    get: (key: string) => ({ value: mockCookiesStore.get(key) }),
-    set: (key: string, value: string) => {
-      mockCookiesStore.set(key, value);
-    },
-    delete: (key: string) => {
-      mockCookiesStore.delete(key);
-    },
-  })),
-}));
+// next/headers の cookies() を確実にホイストしてモック
+const mockCookiesMap = new Map<string, string>();
+vi.mock("next/headers", () => {
+  return {
+    cookies: async () => ({
+      get: (key: string) => {
+        const val = mockCookiesMap.get(key);
+        return val ? { name: key, value: val } : undefined;
+      },
+      set: (key: string, value: string) => {
+        mockCookiesMap.set(key, value);
+      },
+      delete: (key: string) => {
+        mockCookiesMap.delete(key);
+      },
+    }),
+    headers: async () => new Headers(),
+  };
+});
 
-// next/cache の revalidatePath をモック
+// next/cache の revalidatePath / revalidateTag をモック
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+  revalidateTag: vi.fn(),
+}));
+
+// next/navigation のモック
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/",
 }));

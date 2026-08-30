@@ -27,5 +27,6 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - name: Run Tests
-        run: npm run test -- --reporter=verbose
+      - name: Run Tests with diagnostics
+        run: |
+          npx vitest run --reporter=verbose || (echo "=== VITEST FAILURE REPORT ===" && exit 1)
