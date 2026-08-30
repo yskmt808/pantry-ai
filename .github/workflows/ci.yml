@@ -17,6 +17,7 @@ jobs:
       NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
       CI: "true"
       NODE_ENV: "test"
+      VITEST: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,5 +27,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - name: Run Vitest with inline reporters
-        run: npx vitest run --reporter=basic
+      - name: Run Tests
+        run: npm run test -- --reporter=verbose
