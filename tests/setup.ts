@@ -24,21 +24,30 @@ if (typeof window !== "undefined") {
     })),
   });
 
-  global.ResizeObserver = class ResizeObserver {
+  const MockResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
     disconnect() {}
   };
+  window.ResizeObserver = MockResizeObserver;
+  global.ResizeObserver = MockResizeObserver;
 
-  global.IntersectionObserver = class IntersectionObserver {
+  const MockIntersectionObserver = class IntersectionObserver {
     observe() {}
     unobserve() {}
     disconnect() {}
   } as unknown as typeof IntersectionObserver;
+  window.IntersectionObserver = MockIntersectionObserver;
+  global.IntersectionObserver = MockIntersectionObserver;
+
+  window.scrollTo = vi.fn();
 }
 
 // next/headers の cookies() を確実にホイストしてモック
-const mockCookiesMap = new Map<string, string>();
+const { mockCookiesMap } = vi.hoisted(() => ({
+  mockCookiesMap: new Map<string, string>(),
+}));
+
 vi.mock("next/headers", () => {
   return {
     cookies: async () => ({

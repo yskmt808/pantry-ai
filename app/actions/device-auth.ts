@@ -410,6 +410,36 @@ export async function authorizeDeviceLink(
 export async function consumeDeviceLink(
   deviceCode: string
 ): Promise<{ success: boolean; householdId?: string; error?: string }> {
+  if (isTestOrPlaceholderEnv()) {
+    const demo = demoSessions.get(deviceCode);
+    const householdId = demo?.householdId || "household-demo-1";
+    if (demo) {
+      demo.status = "consumed";
+    }
+
+    try {
+      const cookieStore = await cookies();
+      cookieStore.set("pantry_shared_device", "true", {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+        sameSite: "lax",
+        httpOnly: false,
+        secure: false,
+      });
+      cookieStore.set("pantry_household_id", householdId, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+        sameSite: "lax",
+        httpOnly: true,
+        secure: false,
+      });
+    } catch {
+      // ignore
+    }
+
+    return { success: true, householdId };
+  }
+
   try {
     const admin = createAdminClient();
     const { data, error } = await admin
@@ -437,18 +467,16 @@ export async function consumeDeviceLink(
       demo.status = "consumed";
     }
 
-    if (!isTestOrPlaceholderEnv()) {
-      try {
-        await admin
-          .from("device_link_sessions")
-          .update({
-            status: "consumed",
-            updated_at: new Date().toISOString(),
-          } as unknown as never)
-          .eq("device_code", deviceCode);
-      } catch {
-        // ignore
-      }
+    try {
+      await admin
+        .from("device_link_sessions")
+        .update({
+          status: "consumed",
+          updated_at: new Date().toISOString(),
+        } as unknown as never)
+        .eq("device_code", deviceCode);
+    } catch {
+      // ignore
     }
 
     // 共有端末用クッキーを設定
