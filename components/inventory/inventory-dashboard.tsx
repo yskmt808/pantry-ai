@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { LocationTabs } from "./location-tabs";
 import { ItemCard } from "./item-card";
 import { ItemFormDialog } from "./item-form-dialog";
@@ -34,6 +34,7 @@ import {
   Sparkles,
   AlertTriangle,
   PackageOpen,
+  RotateCcw,
 } from "lucide-react";
 
 interface InventoryDashboardProps {
@@ -41,6 +42,8 @@ interface InventoryDashboardProps {
   user: User | null;
   isSharedDevice?: boolean;
 }
+
+const DEMO_STORAGE_KEY = "pantry_demo_items_v1";
 
 // 未ログイン時用のデモデータ
 const DEMO_ITEMS: ItemWithDetails[] = [
@@ -295,6 +298,49 @@ export function InventoryDashboard({
   const [actionTargetBatch, setActionTargetBatch] = useState<ItemBatch | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
 
+  // デモ用ローカルストレージ保存ヘルパー
+  const saveDemoItems = (newItems: ItemWithDetails[]) => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(newItems));
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  // クライアントマウント時に未ログインであれば localStorage から復元
+  useEffect(() => {
+    if (!isLoggedIn && typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(DEMO_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setItems(parsed);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [isLoggedIn]);
+
+  // ログイン時はサーバーの initialItems と同期
+  useEffect(() => {
+    if (isLoggedIn) {
+      setItems(initialItems);
+    }
+  }, [initialItems, isLoggedIn]);
+
+  // デモデータのリセット
+  const handleResetDemoData = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(DEMO_STORAGE_KEY);
+    }
+    setItems(DEMO_ITEMS);
+  };
+
   // 各保管場所ごとのアイテム数集計
   const locationCounts = useMemo(() => {
     const counts: Record<string, number> = { all: items.length };
@@ -392,8 +438,8 @@ export function InventoryDashboard({
 
   // 先入れ先出し（FIFO）数量増減ハンドラ（開封済み最優先 ➔ 古い期限/購入日順）
   const handleAdjustQuantity = async (id: string, delta: number) => {
-    setItems((prev) =>
-      prev.map((item) => {
+    setItems((prev) => {
+      const updated = prev.map((item) => {
         if (item.id === id) {
           const oldTotal = Number(item.current_quantity);
           const newQty = Math.max(0, Number((oldTotal + delta).toFixed(2)));
@@ -432,10 +478,14 @@ export function InventoryDashboard({
           };
         }
         return item;
-      })
-    );
+      });
+      if (!isLoggedIn) {
+        saveDemoItems(updated);
+      }
+      return updated;
+    });
 
-    if (user) {
+    if (isLoggedIn) {
       try {
         await adjustItemQuantity(id, delta);
       } catch (err) {
@@ -446,9 +496,9 @@ export function InventoryDashboard({
 
   // 買い足し（新ロット追加）ハンドラ
   const handleAddBatch = async (itemId: string, input: BatchInput) => {
-    if (!user) {
-      setItems((prev) =>
-        prev.map((item) => {
+    if (!isLoggedIn) {
+      setItems((prev) => {
+        const updated = prev.map((item) => {
           if (item.id === itemId) {
             const newBatch = {
               id: `demo-batch-${Date.now()}`,
@@ -472,8 +522,10 @@ export function InventoryDashboard({
             };
           }
           return item;
-        })
-      );
+        });
+        saveDemoItems(updated);
+        return updated;
+      });
       return;
     }
 
@@ -503,9 +555,9 @@ export function InventoryDashboard({
   const handleOpenBatch = async (batchId: string, itemId: string) => {
     const todayStr = new Date().toISOString().split("T")[0];
 
-    if (!user) {
-      setItems((prev) =>
-        prev.map((item) => {
+    if (!isLoggedIn) {
+      setItems((prev) => {
+        const updated = prev.map((item) => {
           if (item.id === itemId) {
             const step = Number(item.consumption_step) || 1;
             const targetBatch = (item.item_batches || []).find((b) => b.id === batchId);
@@ -542,8 +594,10 @@ export function InventoryDashboard({
             return { ...item, item_batches: sorted };
           }
           return item;
-        })
-      );
+        });
+        saveDemoItems(updated);
+        return updated;
+      });
       return;
     }
 
@@ -568,8 +622,8 @@ export function InventoryDashboard({
     itemId: string,
     reason: BatchProcessReason
   ) => {
-    setItems((prev) =>
-      prev.map((item) => {
+    setItems((prev) => {
+      const updated = prev.map((item) => {
         if (item.id === itemId) {
           const remBatches = (item.item_batches || []).filter((b) => b.id !== batchId);
           const newTotal = Number(remBatches.reduce((s, b) => s + Number(b.quantity), 0).toFixed(2));
@@ -581,8 +635,12 @@ export function InventoryDashboard({
           };
         }
         return item;
-      })
-    );
+      });
+      if (!isLoggedIn) {
+        saveDemoItems(updated);
+      }
+      return updated;
+    });
 
     if (isLoggedIn) {
       await processBatch(itemId, batchId, reason);
@@ -596,10 +654,10 @@ export function InventoryDashboard({
 
   // アイテム（品目マスタ）登録・更新ハンドラ
   const handleFormSubmit = async (input: ItemInput, itemId?: string) => {
-    if (!user) {
+    if (!isLoggedIn) {
       if (itemId) {
-        setItems((prev) =>
-          prev.map((it) =>
+        setItems((prev) => {
+          const updated = prev.map((it) =>
             it.id === itemId
               ? {
                   ...it,
@@ -612,8 +670,10 @@ export function InventoryDashboard({
                   updated_at: new Date().toISOString(),
                 }
               : it
-          )
-        );
+          );
+          saveDemoItems(updated);
+          return updated;
+        });
       } else {
         const newItem: ItemWithDetails = {
           id: `demo-${Date.now()}`,
@@ -649,7 +709,11 @@ export function InventoryDashboard({
             : [],
           item_batches: [],
         };
-        setItems((prev) => [newItem, ...prev]);
+        setItems((prev) => {
+          const updated = [newItem, ...prev];
+          saveDemoItems(updated);
+          return updated;
+        });
 
         setBatchTargetItem(newItem);
         setBatchDialogOpen(true);
@@ -688,7 +752,13 @@ export function InventoryDashboard({
   // 削除ハンドラ
   const handleDelete = async (id: string) => {
     if (!confirm("この品目を削除しますか？関連するすべての在庫ロットも削除されます。")) return;
-    setItems((prev) => prev.filter((it) => it.id !== id));
+    setItems((prev) => {
+      const updated = prev.filter((it) => it.id !== id);
+      if (!isLoggedIn) {
+        saveDemoItems(updated);
+      }
+      return updated;
+    });
     if (isLoggedIn) {
       await deleteItem(id);
     }
@@ -712,17 +782,29 @@ export function InventoryDashboard({
                   </Badge>
                 </h3>
                 <p className="text-xs text-neutral-600 dark:text-neutral-300 mt-0.5">
-                  卵のように「購入は1パック(10個)だが消費は1個ずつ」行う品目も、自然な個数管理とワンタップのパック買い足しができます。
+                  卵のように「購入は1パック(10個)だが消費は1個ずつ」行う品目も、自然な個数管理とワンタップのパック買い足しができます。変更はブラウザに自動保存されます。
                 </p>
               </div>
             </div>
-            <Button
-              onClick={() => setLoginOpen(true)}
-              size="sm"
-              className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 font-semibold"
-            >
-              ログインして始める
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                onClick={handleResetDemoData}
+                variant="outline"
+                size="sm"
+                className="text-xs text-neutral-600 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 flex items-center gap-1"
+                title="デモデータを初期状態にリセット"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>初期値に戻す</span>
+              </Button>
+              <Button
+                onClick={() => setLoginOpen(true)}
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 font-semibold"
+              >
+                ログインして始める
+              </Button>
+            </div>
           </div>
         </div>
       )}
